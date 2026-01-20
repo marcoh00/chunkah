@@ -150,6 +150,16 @@ pub fn write_files_to_tar<W: Write>(
             dir_stack.push(ancestor);
         }
 
+        // Handle hardlinks up front
+        if file_info.file_type != FileType::Directory && file_info.nlink > 1 {
+            if let Some(first_path) = inode_to_path.get(&file_info.ino) {
+                write_hardlink_entry(tar_builder, path, first_path, mtime_clamp, file_info)?;
+                continue;
+            }
+            // First occurrence of this hardlinked file/symlink
+            inode_to_path.insert(file_info.ino, path.clone());
+        }
+
         match file_info.file_type {
             FileType::Directory => {
                 write_dir_entry(tar_builder, path, mtime_clamp, file_info)?;
@@ -157,21 +167,6 @@ pub fn write_files_to_tar<W: Write>(
                 dir_stack.push(path.as_path());
             }
             FileType::File => {
-                // Handle hardlinks
-                if file_info.nlink > 1 {
-                    if let Some(first_path) = inode_to_path.get(&file_info.ino) {
-                        write_hardlink_entry(
-                            tar_builder,
-                            path,
-                            first_path,
-                            mtime_clamp,
-                            file_info,
-                        )?;
-                        continue;
-                    }
-                    // First occurrence of this hardlinked file
-                    inode_to_path.insert(file_info.ino, path.clone());
-                }
                 write_file_entry(tar_builder, rootfs, path, mtime_clamp, file_info)?;
             }
             FileType::Symlink => {
@@ -602,18 +597,31 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let rootfs = Dir::open_ambient_dir(tmp.path(), ambient_authority()).unwrap();
 
-        // Create original file and a hardlink to it
-        rootfs.write("original", "content").unwrap();
-        std::fs::hard_link(tmp.path().join("original"), tmp.path().join("hardlink")).unwrap();
+        // Create a file and a hardlink to it
+        rootfs.write("file1", "content").unwrap();
+        std::fs::hard_link(tmp.path().join("file1"), tmp.path().join("file2")).unwrap();
+
+        // Create a symlink and a hardlink to it
+        rootfs.write("target", "symlink target").unwrap();
+        rootfs.symlink("target", "symlink1").unwrap();
+        std::fs::hard_link(tmp.path().join("symlink1"), tmp.path().join("symlink2")).unwrap();
 
         let files = crate::scan::scan_rootfs(&rootfs).unwrap();
 
-        // Verify the scan picked up the hardlink metadata
-        let original_info = files.get(&Utf8PathBuf::from("/original")).unwrap();
-        let hardlink_info = files.get(&Utf8PathBuf::from("/hardlink")).unwrap();
-        assert_eq!(original_info.ino, hardlink_info.ino, "inodes should match");
-        assert!(original_info.nlink > 1, "nlink should be > 1");
-        assert!(hardlink_info.nlink > 1, "nlink should be > 1");
+        // Verify the scan picked up the hardlink metadata for files
+        let file1_info = files.get(&Utf8PathBuf::from("/file1")).unwrap();
+        let file2_info = files.get(&Utf8PathBuf::from("/file2")).unwrap();
+        assert_eq!(file1_info.ino, file2_info.ino, "file inodes should match");
+        assert!(file1_info.nlink > 1, "file1 nlink should be > 1");
+
+        // Verify the scan picked up the hardlink metadata for symlinks
+        let symlink1_info = files.get(&Utf8PathBuf::from("/symlink1")).unwrap();
+        let symlink2_info = files.get(&Utf8PathBuf::from("/symlink2")).unwrap();
+        assert_eq!(
+            symlink1_info.ino, symlink2_info.ino,
+            "symlink inodes should match"
+        );
+        assert!(symlink1_info.nlink > 1, "symlink1 nlink should be > 1");
 
         let mut output = Vec::new();
         {
@@ -624,27 +632,42 @@ mod tests {
 
         // Parse the tar and verify entries
         let mut archive = tar::Archive::new(output.as_slice());
+        let mut found_file_hardlink = false;
+        let mut found_symlink_hardlink = false;
 
         for entry in archive.entries().unwrap() {
             let entry = entry.unwrap();
             let path = entry.path().unwrap().to_string_lossy().to_string();
 
-            match entry.header().entry_type() {
-                tar::EntryType::Regular => assert_eq!(path, "hardlink"),
-                tar::EntryType::Link => {
-                    assert_eq!(path, "original");
-                    let hardlink_target = entry
-                        .header()
-                        .link_name()
-                        .unwrap()
-                        .unwrap()
-                        .to_string_lossy()
-                        .to_string();
-                    assert_eq!(hardlink_target, "hardlink");
+            if entry.header().entry_type() == tar::EntryType::Link {
+                let link_target = entry
+                    .header()
+                    .link_name()
+                    .unwrap()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string();
+                // file1 comes before file2 alphabetically, so file2 is the hardlink
+                if path == "file2" {
+                    assert_eq!(link_target, "file1");
+                    found_file_hardlink = true;
                 }
-                _ => {}
+                // symlink1 comes before symlink2 alphabetically, so symlink2 is the hardlink
+                if path == "symlink2" {
+                    assert_eq!(link_target, "symlink1");
+                    found_symlink_hardlink = true;
+                }
             }
         }
+
+        assert!(
+            found_file_hardlink,
+            "should have a hardlink entry for file2"
+        );
+        assert!(
+            found_symlink_hardlink,
+            "should have a hardlink entry for symlink2"
+        );
 
         // Sanity-check they extract as hardlinks
         let extract_dir = tempfile::tempdir().unwrap();
@@ -659,12 +682,23 @@ mod tests {
         assert!(status.success(), "tar extraction failed");
 
         use std::os::unix::fs::MetadataExt;
-        let original_meta = std::fs::metadata(extract_dir.path().join("original")).unwrap();
-        let hardlink_meta = std::fs::metadata(extract_dir.path().join("hardlink")).unwrap();
+
+        // Check file hardlinks
+        let file1_meta = std::fs::metadata(extract_dir.path().join("file1")).unwrap();
+        let file2_meta = std::fs::metadata(extract_dir.path().join("file2")).unwrap();
         assert_eq!(
-            original_meta.ino(),
-            hardlink_meta.ino(),
+            file1_meta.ino(),
+            file2_meta.ino(),
             "extracted files should have same inode"
+        );
+
+        // Check symlink hardlinks
+        let symlink1_meta = std::fs::symlink_metadata(extract_dir.path().join("symlink1")).unwrap();
+        let symlink2_meta = std::fs::symlink_metadata(extract_dir.path().join("symlink2")).unwrap();
+        assert_eq!(
+            symlink1_meta.ino(),
+            symlink2_meta.ino(),
+            "extracted symlinks should have same inode"
         );
     }
 }
