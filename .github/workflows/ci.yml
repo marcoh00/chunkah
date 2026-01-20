@@ -43,15 +43,12 @@ jobs:
       - name: Run tests
         run: just test
       - name: Push to ghcr.io
+        if: github.event_name == 'push'
         run: |
           set -euo pipefail
           podman login -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }} ghcr.io
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            podman push chunkah ghcr.io/${{ github.repository }}:pr-${{ github.event.pull_request.number }}-${{ github.sha }}
-          else
-            podman push chunkah ghcr.io/${{ github.repository }}:${{ github.sha }}
-            podman push chunkah ghcr.io/${{ github.repository }}:latest
-          fi
+          podman push chunkah ghcr.io/${{ github.repository }}:${{ github.sha }}
+          podman push chunkah ghcr.io/${{ github.repository }}:latest
 
   release:
     needs: e2e-tests
