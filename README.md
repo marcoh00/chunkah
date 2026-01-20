@@ -85,7 +85,7 @@ Another option is using the chunkah image directly and image mounts:
 ```shell
 IMG=quay.io/fedora/fedora-minimal:latest
 podman pull $IMG # image must be available locally
-export CHUNKAH_CONFIG_STR=$(podman inspect $IMG)
+export CHUNKAH_CONFIG_STR="$(podman inspect $IMG)"
 podman run --rm --mount=type=image,src=$IMG,dest=/chunkah \
   -e CHUNKAH_CONFIG_STR quay.io/jlebon/chunkah build | podman load
 ```
@@ -97,7 +97,7 @@ You can use the chunkah image directly using image mounts (requires v28+):
 ```shell
 IMG=quay.io/fedora/fedora-minimal:latest
 docker pull $IMG # image must be available locally
-export CHUNKAH_CONFIG_STR=$(docker inspect $IMG)
+export CHUNKAH_CONFIG_STR="$(docker inspect $IMG)"
 docker run --rm --mount=type=image,src=$IMG,destination=/chunkah \
   -e CHUNKAH_CONFIG_STR quay.io/jlebon/chunkah build > out.ociarchive
 docker run --rm -ti -v $(pwd):/srv:z -w /srv quay.io/skopeo/stable \
@@ -177,7 +177,7 @@ For completeness, note it's of course also possible to split any arbitrary
 rootfs, regardless of where it comes from.
 
 ```shell
-podman run --rm -v root:/chunkah:z -e CHUNKAH_CONFIG_STR=$(cat config.json) \
+podman run --rm -v root:/chunkah:z -e CHUNKAH_CONFIG_STR="$(cat config.json)" \
   quay.io/jlebon/chunkah build > out.ociarchive
 ```
 
