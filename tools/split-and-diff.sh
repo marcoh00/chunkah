@@ -177,11 +177,24 @@ get_raw_layer_tarball() {
     rm -rf "${workdir}"
 }
 
-# Prepare original image
+# Prepare original image (use localhost/ prefix for consistent naming)
 echo "Preparing original image..."
-original_image="${run_id}-original"
-skopeo copy "${source_image}" "oci-archive:${tmpdir}/original.ociarchive"
-skopeo copy "oci-archive:${tmpdir}/original.ociarchive" "containers-storage:${original_image}"
+original_image="localhost/${run_id}-original:latest"
+skopeo copy "${source_image}" "containers-storage:${original_image}"
+
+# Flatten if multi-layer
+layer_count=$(podman inspect --format '{{len .RootFS.Layers}}' "${original_image}")
+if [[ "${layer_count}" -gt 1 ]]; then
+    echo "Flattening multi-layer image (${layer_count} layers)..."
+    squashed_image="localhost/${run_id}-original-squashed:latest"
+    buildah build --squash -t "${squashed_image}" -f - <<< "FROM containers-storage:${original_image}"
+    podman rmi "${original_image}"
+    podman tag "${squashed_image}" "${original_image}"
+    podman rmi "${squashed_image}"
+fi
+
+# Export to ociarchive for comparison
+skopeo copy "containers-storage:${original_image}" "oci-archive:${tmpdir}/original.ociarchive"
 
 # Split image via Containerfile.splitter
 echo "Splitting image through chunkah..."
