@@ -279,7 +279,7 @@ mod tests {
             .setxattr("opt/myapp/data", XATTR_NAME, b"myapp")
             .unwrap();
 
-        let files = crate::scan::scan_rootfs(&rootfs, false).unwrap();
+        let files = crate::scan::Scanner::new(&rootfs).scan().unwrap();
 
         let xattr_repo = xattr::XattrRepo::load(&files, 0).unwrap().unwrap();
         let packages = rpm_qa::load_from_str(RPM_FIXTURE).unwrap();

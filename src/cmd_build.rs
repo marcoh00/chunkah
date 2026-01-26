@@ -170,7 +170,9 @@ pub fn run(args: &BuildArgs) -> Result<()> {
     let rootfs = Dir::open_ambient_dir(args.rootfs.as_std_path(), ambient_authority())
         .with_context(|| format!("opening rootfs {}", args.rootfs))?;
 
-    let files = crate::scan::scan_rootfs(&rootfs, args.skip_special_files)
+    let files = crate::scan::Scanner::new(&rootfs)
+        .skip_special_files(args.skip_special_files)
+        .scan()
         .with_context(|| format!("scanning {} for files", args.rootfs))?;
 
     let repos =

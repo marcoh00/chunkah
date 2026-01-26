@@ -422,7 +422,7 @@ mod tests {
         let rootfs = Dir::open_ambient_dir(tmp.path(), ambient_authority()).unwrap();
         setup(&rootfs);
 
-        let mut files = crate::scan::scan_rootfs(&rootfs, false).unwrap();
+        let mut files = crate::scan::Scanner::new(&rootfs).scan().unwrap();
         if let Some(modify) = modify_files {
             modify(&mut files);
         }
@@ -605,7 +605,7 @@ mod tests {
         rootfs.symlink("target", "symlink1").unwrap();
         std::fs::hard_link(tmp.path().join("symlink1"), tmp.path().join("symlink2")).unwrap();
 
-        let files = crate::scan::scan_rootfs(&rootfs, false).unwrap();
+        let files = crate::scan::Scanner::new(&rootfs).scan().unwrap();
 
         // Verify the scan picked up the hardlink metadata for files
         let file1_info = files.get(&Utf8PathBuf::from("/file1")).unwrap();
