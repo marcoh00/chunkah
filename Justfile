@@ -51,3 +51,7 @@ profile *ARGS:
 # Benchmark chunkah with hyperfine
 benchmark *ARGS:
     just -f tools/perf/Justfile benchmark {{ ARGS }}
+
+# Cut a release (use --no-push to prepare without pushing)
+release *ARGS:
+    ./tools/release.py {{ ARGS }}
