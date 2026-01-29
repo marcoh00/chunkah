@@ -19,7 +19,8 @@ just clippy             # Run clippy linter
 just fmt                # Check code formatting
 just markdownlint       # Lint markdown files
 just checkall           # Run all checks (shellcheck, check, fmt, clippy, markdownlint)
-just test               # Run end-to-end tests (requires built container image)
+just test               # Run all end-to-end tests (requires built container image)
+just test fcos          # Run only the FCOS e2e test
 just buildimg           # Build chunkah container image
 just buildimg nochunk   # Build chunkah container image without chunking (faster)
 ```
