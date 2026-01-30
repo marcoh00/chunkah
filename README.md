@@ -206,6 +206,17 @@ have the advantage of capturing annotations. Otherwise, it's also possible to
 set annotations directly using `--annotation`. Labels can also be added via
 `--label`.
 
+### Compatibility with bootable (bootc) images
+
+chunkah has no special handling for [bootable container images]. This should
+work fine for non-OSTree based images (i.e. "plain" images). Packing still needs
+to be fine-tuned for bootable images (or very large images in general). You will
+likely want to increase the default maximum number of layers from 64 (e.g. 96)
+for better splitting.
+
+OSTree-based images as created by `rpm-ostree` and `ostree container
+encapsulate` are not supported.
+
 ## Origins
 
 chunkah is a generalized successor to rpm-ostree's [build-chunked-oci] command
