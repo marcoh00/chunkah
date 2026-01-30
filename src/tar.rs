@@ -349,6 +349,7 @@ fn write_symlink_entry<W: Write>(
 }
 
 fn write_oci_archive_to<W: Write>(oci_dir: &Dir, writer: W) -> Result<()> {
+    use cap_std_ext::cap_std::fs::FileType as CapFileType;
     use cap_std_ext::dirext::CapStdExtDirExt;
     use std::ops::ControlFlow;
 
@@ -379,13 +380,25 @@ fn write_oci_archive_to<W: Write>(oci_dir: &Dir, writer: W) -> Result<()> {
     oci_dir
         .walk(&config, |component| {
             let path = component.path;
-            if component.file_type.is_dir() {
+            // if the d_type is missing (e.g. fuse), fallback to `stat`
+            // XXX: cap-std docs mention is_unknown() exists, but it doesn't; add it
+            // XXX: though probably should extend WalkConfiguration to have a ensure_file_type bool
+            let file_type = if component.file_type == CapFileType::unknown() {
+                component
+                    .dir
+                    .symlink_metadata(component.filename)
+                    .with_context(|| format!("getting metadata for {}", path.display()))?
+                    .file_type()
+            } else {
+                component.file_type
+            };
+            if file_type.is_dir() {
                 let mut header = dir_header.clone();
                 // Tar directories need a trailing slash
                 let path_str = format!("{}/", path.display());
                 tar.append_data(&mut header, &path_str, std::io::empty())
                     .with_context(|| format!("appending directory {}", path.display()))?;
-            } else if component.file_type.is_file() {
+            } else if file_type.is_file() {
                 let content = component
                     .dir
                     .read(component.filename)
@@ -395,7 +408,11 @@ fn write_oci_archive_to<W: Write>(oci_dir: &Dir, writer: W) -> Result<()> {
                 tar.append_data(&mut header, path, content.as_slice())
                     .with_context(|| format!("appending {}", path.display()))?;
             } else {
-                anyhow::bail!("unsupported file type for {}", path.display());
+                anyhow::bail!(
+                    "unsupported file type for {} ({:?})",
+                    path.display(),
+                    file_type
+                );
             }
             Ok::<_, anyhow::Error>(ControlFlow::Continue(()))
         })
