@@ -79,6 +79,8 @@ argument.
 >
 > For Buildah versions before v1.43, this also requires `-v $(pwd):/run/src
 > --security-opt=label=disable`.
+
+<!-- markdownlint-disable-next-line MD028 -->
 > [!NOTE]
 > There is [a known bug][buildah-annotations-bug] in this workflow preventing
 > informational layer annotations added by chunkah from persisting to the final
