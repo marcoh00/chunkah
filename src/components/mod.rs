@@ -212,7 +212,9 @@ impl ComponentsRepos {
             .filter(|&s| s > 0.0)
             // SAFETY: somehow getting NaN is a logic error somewhere
             .min_by(|a, b| a.partial_cmp(b).unwrap())
-            .unwrap();
+            // All components have stability 0.0; just default all of them to a
+            // sensible value.
+            .unwrap_or(0.5);
         let fallback_stability = min_stability / 2.0;
         for comp in components.values_mut() {
             if comp.stability == 0.0 {
@@ -352,6 +354,34 @@ mod tests {
                 .files
                 .contains_key(Utf8Path::new("/usr/lib/sysimage/rpm/rpmdb.sqlite")),
             "/usr/lib/sysimage/rpm/rpmdb.sqlite should be unclaimed"
+        );
+    }
+
+    #[test]
+    fn test_into_components_xattr_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rootfs = Dir::open_ambient_dir(tmp.path(), ambient_authority()).unwrap();
+
+        rootfs.create_dir_all("opt/myapp").unwrap();
+        rootfs.write("opt/myapp/config", "config").unwrap();
+        rootfs.setxattr("opt/myapp", XATTR_NAME, b"myapp").unwrap();
+
+        let files = crate::scan::Scanner::new(&rootfs).scan().unwrap();
+
+        let xattr_repo = xattr::XattrRepo::load(&files, 0).unwrap().unwrap();
+        let repos: Vec<Box<dyn ComponentsRepo>> = vec![Box::new(xattr_repo)];
+        let loaded = ComponentsRepos {
+            repos,
+            default_mtime_clamp: 0,
+        };
+
+        let components = loaded.into_components(files);
+
+        assert!(components.contains_key("xattr/myapp"));
+        assert!(
+            components["xattr/myapp"]
+                .files
+                .contains_key(Utf8Path::new("/opt/myapp/config"))
         );
     }
 }
