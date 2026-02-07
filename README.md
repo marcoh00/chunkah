@@ -7,6 +7,23 @@ with content-based layers.
 > chunkah is currently under heavy development and not yet ready for production.
 > Experimental usage and feedback is much appreciated!
 
+## Table of Contents
+
+- [Motivation](#motivation)
+- [Highlights](#highlights)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Splitting an existing image](#splitting-an-existing-image)
+  - [Splitting an image at build time](#splitting-an-image-at-build-time-buildahpodman-only)
+- [Advanced Usage](#advanced-usage)
+  - [Understanding components](#understanding-components)
+  - [Customizing the layers](#customizing-the-layers)
+  - [Limiting the number of layers](#limiting-the-number-of-layers)
+  - [Building from a raw rootfs](#building-from-a-raw-rootfs)
+  - [Customizing the OCI image config and annotations](#customizing-the-oci-image-config-and-annotations)
+  - [Compatibility with bootable (bootc) images](#compatibility-with-bootable-bootc-images)
+- [Origins](#origins)
+
 ## Motivation
 
 Traditionally, images built using a `Dockerfile` result in a multi-layered image
