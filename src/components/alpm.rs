@@ -192,3 +192,35 @@ impl ComponentsRepo for AlpmComponentsRepo {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::BTreeMap, path::Path};
+
+    use camino::Utf8Path;
+    use ocidir::cap_std::{ambient_authority, fs::Dir};
+
+    use crate::components::{ComponentsRepo, FileType, alpm::AlpmComponentsRepo};
+
+    fn rootfs() -> Dir {
+        let rootfs = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("arch-rootfs");
+        Dir::open_ambient_dir(&rootfs, ambient_authority()).unwrap()
+    }
+
+    #[test]
+    fn claims_correct_files() {
+        let files = BTreeMap::new();
+        let alpm = AlpmComponentsRepo::load(&rootfs(), &files)
+            .unwrap()
+            .unwrap();
+        let claims = alpm.claims_for_path(Utf8Path::new("/usr"), FileType::Directory);
+        assert_eq!(claims.len(), 2);
+        let claims = alpm.claims_for_path(Utf8Path::new("/usr"), FileType::File);
+        assert!(claims.is_empty());
+        let claims = alpm.claims_for_path(Utf8Path::new("/usr"), FileType::Symlink);
+        assert!(claims.is_empty());
+    }
+}
