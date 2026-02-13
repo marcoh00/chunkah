@@ -378,10 +378,12 @@ etc/services	b80b33810d79289b09bac307a99b4b54
     #[test]
     fn test_parse_desc() {
         let parsed_desc = DESC_CONTENTS.parse::<LocalAlpmDbFile>().unwrap();
-        println!("{:#?}", parsed_desc);
-        let base = parsed_desc.base().unwrap();
-        let builddate = parsed_desc.builddate().unwrap();
-        println!("base=[{base}], builddate=[{builddate}]");
+        assert_eq!(parsed_desc.base().unwrap(), "filesystem");
+        assert_eq!(parsed_desc.builddate().unwrap(), 1760286101);
+        assert_eq!(
+            parsed_desc.get_single_line_value("NAME").unwrap(),
+            "filesystem"
+        );
     }
 
     #[test]
@@ -419,5 +421,19 @@ etc/services	b80b33810d79289b09bac307a99b4b54
             Utf8Path::new("usr/share/licenses/iana-etc/LICENSE")
         );
         assert_eq!(as_paths.next(), None);
+
+        let mut other_section = parsed_files
+            .get_multi_line_value("BACKUP")
+            .unwrap()
+            .into_iter();
+        assert_eq!(
+            other_section.next().unwrap(),
+            "etc/protocols\tb9833a5373ef2f5df416f4f71ccb42eb"
+        );
+        assert_eq!(
+            other_section.next().unwrap(),
+            "etc/services\tb80b33810d79289b09bac307a99b4b54"
+        );
+        assert_eq!(other_section.next(), None);
     }
 }
