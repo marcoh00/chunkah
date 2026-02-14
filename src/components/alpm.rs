@@ -4,7 +4,10 @@ use cap_std_ext::cap_std::fs::Dir;
 use indexmap::IndexMap;
 use std::{collections::HashMap, io::Read, str::FromStr};
 
-use crate::components::{ComponentId, ComponentInfo, ComponentsRepo, FileMap, FileType};
+use crate::{
+    components::{ComponentId, ComponentInfo, ComponentsRepo, FileMap, FileType},
+    utils::{calculate_stability, canonicalize_parent_path},
+};
 
 const REPO_NAME: &str = "alpm";
 const LOCALDB_PATHS: &[&str] = &["usr/lib/sysimage/lib/pacman/local", "var/lib/pacman/local"];
@@ -13,8 +16,8 @@ const DESC_FILENAME: &str = "desc";
 const FILES_FILENAME: &str = "files";
 
 pub struct AlpmComponentsRepo {
-    /// Unique component (BASE) names mapped to buildtime, indexed by ComponentId.
-    components: IndexMap<String, u64>,
+    /// Unique component (BASE) names mapped to builddate and stability, indexed by ComponentId.
+    components: IndexMap<String, (u64, f64)>,
 
     /// Mapping from path to list of ComponentId.
     ///
@@ -24,12 +27,12 @@ pub struct AlpmComponentsRepo {
 }
 
 impl AlpmComponentsRepo {
-    pub fn load(rootfs: &Dir, files: &FileMap) -> Result<Option<Self>> {
+    pub fn load(rootfs: &Dir, files: &FileMap, now: u64) -> Result<Option<Self>> {
         let local_db = match Self::try_open_local_db(rootfs) {
             Some(dir) => dir,
             None => return Ok(None),
         };
-        Self::load_from_db(&local_db, files).map(Some)
+        Self::load_from_db(rootfs, &local_db, files, now).map(Some)
     }
 
     fn try_open_local_db(rootfs: &Dir) -> Option<Dir> {
@@ -43,7 +46,12 @@ impl AlpmComponentsRepo {
 
     /// Starting from the `local_db` base directory, iterate over the packages in the local database,
     /// process package metadata and generate an index of components and their files.
-    pub fn load_from_db(local_db: &Dir, image_files: &FileMap) -> Result<Self> {
+    pub fn load_from_db(
+        rootfs: &Dir,
+        local_db: &Dir,
+        image_files: &FileMap,
+        now: u64,
+    ) -> Result<Self> {
         let mut components = IndexMap::new();
         let mut path_to_components = HashMap::new();
 
@@ -69,12 +77,15 @@ impl AlpmComponentsRepo {
                     })?;
                 let basename = desc.base()?;
                 let builddate = desc.builddate()?;
-                let (component_id, _) = components.insert_full(basename.to_string(), builddate);
+                let stability = calculate_stability(&[], builddate, now)?;
+                let (component_id, _) =
+                    components.insert_full(basename.to_string(), (builddate, stability));
                 Self::files_to_map(
                     &mut path_to_components,
                     ComponentId(component_id),
                     files.files(),
                     image_files,
+                    rootfs,
                 )?;
             }
         }
@@ -109,9 +120,10 @@ impl AlpmComponentsRepo {
         path_to_components: &mut HashMap<Utf8PathBuf, Vec<ComponentId>>,
         component_id: ComponentId,
         pkgdb_files: Vec<&Utf8Path>,
-        // TODO: Use this for path canonicalization
-        _image_files: &FileMap,
+        image_files: &FileMap,
+        rootfs: &Dir,
     ) -> Result<()> {
+        let mut canonicalization_cache = HashMap::new();
         for path in pkgdb_files {
             // Unfortunately, we cannot differentiate between file types, because we only have paths.
             // As such, we will not use that information.
@@ -132,10 +144,15 @@ impl AlpmComponentsRepo {
             let mut absolute_path = Utf8PathBuf::from_str("/").unwrap();
             absolute_path.push(path);
 
-            // TODO: Canonicalization using `absolute_path`
+            let canonical_path = canonicalize_parent_path(
+                rootfs,
+                image_files,
+                &absolute_path,
+                &mut canonicalization_cache,
+            )?;
 
             path_to_components
-                .entry(absolute_path)
+                .entry(canonical_path)
                 .or_default()
                 .push(component_id);
         }
@@ -161,11 +178,11 @@ impl ComponentsRepo for AlpmComponentsRepo {
 
     fn component_info(&self, id: ComponentId) -> ComponentInfo<'_> {
         // Safety: We handed out the ComponentId by ourselves and obtained it directly from the `IndexMap`
-        let (pkgbase, build_time) = self.components.get_index(id.0).unwrap();
+        let (pkgbase, (builddate, stability)) = self.components.get_index(id.0).unwrap();
         ComponentInfo {
             name: pkgbase.as_str(),
-            mtime_clamp: *build_time,
-            stability: 0.0,
+            mtime_clamp: *builddate,
+            stability: *stability,
         }
     }
 }
@@ -283,7 +300,10 @@ impl LocalAlpmDbFile {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, path::Path};
+    use std::{
+        collections::{BTreeMap, BTreeSet},
+        path::Path,
+    };
 
     use camino::Utf8Path;
     use cap_std_ext::cap_std::{ambient_authority, fs::Dir};
@@ -362,17 +382,34 @@ etc/services	b80b33810d79289b09bac307a99b4b54
         Dir::open_ambient_dir(&rootfs, ambient_authority()).unwrap()
     }
 
+    fn now_secs() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
     #[test]
     fn claims_correct_files() {
         let files = BTreeMap::new();
-        let alpm = AlpmComponentsRepo::load(&rootfs(), &files)
+        let alpm = AlpmComponentsRepo::load(&rootfs(), &files, now_secs())
             .unwrap()
             .unwrap();
         let claims = alpm.claims_for_path(Utf8Path::new("/usr"), FileType::Directory);
-        assert!(claims.len() > 1);
+        assert_eq!(claims.len(), 2);
+        let mut component_info = claims.iter().map(|claim| alpm.component_info(*claim));
+        let mut expected_components = ["iana-etc", "filesystem"]
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        assert!(expected_components.remove(component_info.next().unwrap().name));
+        assert!(expected_components.remove(component_info.next().unwrap().name));
+        assert!(component_info.next().is_none());
 
         let claims = alpm.claims_for_path(Utf8Path::new("/etc/fstab"), FileType::File);
         assert_eq!(claims.len(), 1);
+        let mut component_info = claims.iter().map(|claim| alpm.component_info(*claim));
+        assert_eq!(component_info.next().unwrap().name, "filesystem");
+        assert!(component_info.next().is_none());
     }
 
     #[test]
