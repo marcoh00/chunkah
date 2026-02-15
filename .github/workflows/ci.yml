@@ -59,30 +59,30 @@ jobs:
             podman push chunkah ghcr.io/${{ github.repository }}:latest
           fi
 
-  release:
-    needs: e2e-tests
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      packages: write
-    steps:
-      - name: Install skopeo
-        run: sudo apt-get update && sudo apt-get install -y skopeo
-      - name: Push to quay.io
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.docker
-          echo '${{ secrets.QUAY_AUTH }}' > ~/.docker/config.json
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-            skopeo copy --src-creds=${{ github.actor }}:${{ secrets.GITHUB_TOKEN }} \
-              docker://ghcr.io/${{ github.repository }}:${{ github.sha }} docker://quay.io/jlebon/chunkah:${TAG}
-            skopeo copy --src-creds=${{ github.actor }}:${{ secrets.GITHUB_TOKEN }} \
-              docker://ghcr.io/${{ github.repository }}:${{ github.sha }} docker://quay.io/jlebon/chunkah:latest
-          else
-            skopeo copy --src-creds=${{ github.actor }}:${{ secrets.GITHUB_TOKEN }} \
-              docker://ghcr.io/${{ github.repository }}:${{ github.sha }} docker://quay.io/jlebon/chunkah:dev
-          fi
+  # release:
+  #   needs: e2e-tests
+  #   if: github.event_name == 'push'
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     packages: write
+  #   steps:
+  #     - name: Install skopeo
+  #       run: sudo apt-get update && sudo apt-get install -y skopeo
+  #     - name: Push to quay.io
+  #       run: |
+  #         set -euo pipefail
+  #         mkdir -p ~/.docker
+  #         echo '${{ secrets.QUAY_AUTH }}' > ~/.docker/config.json
+  #         if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+  #           TAG="${GITHUB_REF#refs/tags/}"
+  #           skopeo copy --src-creds=${{ github.actor }}:${{ secrets.GITHUB_TOKEN }} \
+  #             docker://ghcr.io/${{ github.repository }}:${{ github.sha }} docker://quay.io/jlebon/chunkah:${TAG}
+  #           skopeo copy --src-creds=${{ github.actor }}:${{ secrets.GITHUB_TOKEN }} \
+  #             docker://ghcr.io/${{ github.repository }}:${{ github.sha }} docker://quay.io/jlebon/chunkah:latest
+  #         else
+  #           skopeo copy --src-creds=${{ github.actor }}:${{ secrets.GITHUB_TOKEN }} \
+  #             docker://ghcr.io/${{ github.repository }}:${{ github.sha }} docker://quay.io/jlebon/chunkah:dev
+  #         fi
       - name: Cleanup old images
         uses: actions/delete-package-versions@v5
         with:
